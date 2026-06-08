@@ -1,6 +1,6 @@
 """
-SICOMP IA — Motor Cambiario con Totalización en Glosas y Orden Ascendente
-Autor: Juan Salgado
+SICOMP IA — Motor Cambiario (Tabla de Datos Pago Integrada)
+Autor: Juan Salgado (BitCriollo)
 """
 import streamlit as st
 import pandas as pd
@@ -78,7 +78,7 @@ df_proveedores = cargar_maestro_proveedores()
 tab_manual, tab_masivo = st.tabs(["📝 Generador de Operación Individual", "📂 Cargue Masivo en Lote"])
 
 # =======================================================================
-# PESTAÑA 1: MÓDULO MANUAL (FOB Y GASTOS CON TOTALIZACIÓN EN GLOSA)
+# PESTAÑA 1: MÓDULO MANUAL (FOB, GASTOS Y TABLA DE DATOS PAGO)
 # =======================================================================
 with tab_manual:
     col_f, col_r = st.columns([1.1, 1.8])
@@ -105,20 +105,27 @@ with tab_manual:
     with col_r:
         if prov_in and (v_fob > 0 or v_gas > 0):
             st.markdown("### 📊 Previsualización y Ordenamiento Automático")
-            st.markdown(f"**Tercero Mapeado:** `{prov_m}` | `{ciu_m} - {pais_m}`")
+            
+            # --- TABLA DE DATOS PAGO (Diseño exacto de la imagen) ---
+            st.markdown("<div style='text-align: center; font-weight: bold; margin-bottom: 5px;'>Datos pago</div>", unsafe_allow_html=True)
+            df_datos_pago = pd.DataFrame([{
+                "Nombre del beneficiario o Girador": prov_m,
+                "CIUDAD": ciu_m,
+                "PAÍS": pais_m
+            }])
+            st.dataframe(df_datos_pago, hide_index=True, use_container_width=True)
             
             n_fob = calcular_numeral_fob(f_bl_in, f_pago_in)
             mn_txt = f" MN {mn}" if mn else ""
             f_bl_fmt = f_bl_in.strftime('%d/%m/%Y')
             f_pago_fmt = f_pago_in.strftime('%d/%m/%Y')
             
-            # --- CÁLCULO DEL TOTAL PARA EL TEXTO DE LA GLOSA ---
             total_pago = v_fob + v_gas
             total_fmt = format_moneda_co(total_pago)
             
             filas_generadas = []
 
-            # 1. Glosa FOB (Mantiene el valor individual en la columna 'Valor', pero usa el total en el texto)
+            # 1. Glosa FOB (Mantiene el valor individual, texto sumado)
             if v_fob > 0:
                 prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
                 txt_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
@@ -127,7 +134,7 @@ with tab_manual:
                     "Texto legalizacion": txt_fob, "saldo": "", "estado": "CREADA"
                 })
                 
-            # 2. Glosa Gastos (Usa el total en el texto)
+            # 2. Glosa Gastos (Mantiene el valor individual, texto sumado)
             if v_gas > 0:
                 txt_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
                 filas_generadas.append({
@@ -138,7 +145,7 @@ with tab_manual:
             # --- ORDENAMIENTO ASCENDENTE POR NUMERAL ---
             filas_generadas.sort(key=lambda x: int(x["numeral"]))
             
-            # --- MOSTRAR CUADRO PRINCIPAL LIMPIO ---
+            # --- MOSTRAR CUADRO DE NUMERALES ---
             st.markdown("#### Cuadro de Numerales a Procesar")
             df_preview = pd.DataFrame(filas_generadas)[["numeral", "Valor", "Texto legalizacion"]]
             st.dataframe(df_preview, use_container_width=True, hide_index=True)
@@ -179,7 +186,6 @@ with tab_masivo:
                     f_bl_fmt = f_bl.strftime("%d/%m/%Y")
                     f_pago_fmt = f_pago.strftime("%d/%m/%Y")
                     
-                    # CÁLCULO DEL TOTAL
                     total_pago = v_fob + v_gas
                     total_fmt = format_moneda_co(total_pago)
                     
@@ -199,7 +205,6 @@ with tab_masivo:
                             "Texto legalizacion": glosa_gas, "saldo": "", "estado": "CREADA"
                         })
                     
-                    # Ordenar las filas generadas por esta factura específica
                     filas_temp.sort(key=lambda x: int(x["numeral"]))
                     nuevas_filas.extend(filas_temp)
                     
@@ -215,7 +220,7 @@ with tab_masivo:
             st.error(f"Error procesando el archivo. Verifica las columnas de fechas. Detalle: {e}")
 
 # =======================================================================
-# 🗃️ GLOBAL DE SALIDA Y EXPORTACIÓN
+# 🗃️ GRILLA GLOBAL DE SALIDA Y EXPORTACIÓN
 # =======================================================================
 st.markdown("---")
 st.markdown("### 📑 Grilla Consolidada para SICOMP")
