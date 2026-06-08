@@ -1,5 +1,5 @@
 """
-SICOMP IA — Motor Cambiario Simplificado (Solo FOB y Gastos, Orden Ascendente)
+SICOMP IA — Motor Cambiario con Totalización en Glosas y Orden Ascendente
 Autor: Juan Salgado
 """
 import streamlit as st
@@ -78,7 +78,7 @@ df_proveedores = cargar_maestro_proveedores()
 tab_manual, tab_masivo = st.tabs(["📝 Generador de Operación Individual", "📂 Cargue Masivo en Lote"])
 
 # =======================================================================
-# PESTAÑA 1: MÓDULO MANUAL (SÓLO FOB Y GASTOS)
+# PESTAÑA 1: MÓDULO MANUAL (FOB Y GASTOS CON TOTALIZACIÓN EN GLOSA)
 # =======================================================================
 with tab_manual:
     col_f, col_r = st.columns([1.1, 1.8])
@@ -98,7 +98,6 @@ with tab_manual:
             
         st.markdown("---")
         st.markdown("#### Ingreso de Valores (USD)")
-        # Solo se mantienen los campos de FOB y Gastos
         v1, v2 = st.columns(2)
         with v1: v_fob = st.number_input("💵 Valor FOB", min_value=0.0, format="%.2f")
         with v2: v_gas = st.number_input("🚚 Gastos (Flete/Seguro)", min_value=0.0, format="%.2f")
@@ -113,21 +112,24 @@ with tab_manual:
             f_bl_fmt = f_bl_in.strftime('%d/%m/%Y')
             f_pago_fmt = f_pago_in.strftime('%d/%m/%Y')
             
-            # --- CONSTRUCCIÓN DEL ARRAY DE GLOSAS ---
+            # --- CÁLCULO DEL TOTAL PARA EL TEXTO DE LA GLOSA ---
+            total_pago = v_fob + v_gas
+            total_fmt = format_moneda_co(total_pago)
+            
             filas_generadas = []
 
-            # 1. Glosa FOB (2015, 2017, 2022)
+            # 1. Glosa FOB (Mantiene el valor individual en la columna 'Valor', pero usa el total en el texto)
             if v_fob > 0:
                 prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
-                txt_fob = f"{prefijo_fob} X USD {format_moneda_co(v_fob)} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                txt_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
                 filas_generadas.append({
                     "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
                     "Texto legalizacion": txt_fob, "saldo": "", "estado": "CREADA"
                 })
                 
-            # 2. Glosa Gastos (2016)
+            # 2. Glosa Gastos (Usa el total en el texto)
             if v_gas > 0:
-                txt_gas = f"PAGO X USD {format_moneda_co(v_gas)} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                txt_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
                 filas_generadas.append({
                     "Fecha de pago": f_pago_fmt, "numeral": "2016", "Valor": v_gas,
                     "Texto legalizacion": txt_gas, "saldo": "", "estado": "CREADA"
@@ -152,13 +154,68 @@ with tab_manual:
 # PESTAÑA 2: MÓDULO MASIVO
 # =======================================================================
 with tab_masivo:
-    st.info("💡 Plantilla CSV: `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL`, `Fecha Pago`, `Valor FOB`, `Valor Gastos`.")
+    st.info("💡 Plantilla CSV: `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL (YYYY-MM-DD)`, `Fecha Pago (YYYY-MM-DD)`, `Valor FOB`, `Valor Gastos`.")
     archivo_masivo = st.file_uploader("Selecciona el archivo CSV para procesar en lote", type=["csv"])
+    
     if archivo_masivo:
-        st.warning("Asegúrate de que tu CSV tenga las columnas exactas para ejecutar la regla de ordenamiento automático.")
+        try:
+            df_lote = pd.read_csv(archivo_masivo, sep=";")
+            st.success(f"Archivo cargado correctamente. Registros detectados: {len(df_lote)}")
+            
+            if st.button("🚀 Procesar Lote y Generar Glosas Automáticas", use_container_width=True):
+                nuevas_filas = []
+                barra_progreso = st.progress(0)
+                
+                for idx, row in df_lote.iterrows():
+                    f_bl = datetime.strptime(str(row['Fecha BL (YYYY-MM-DD)']).strip(), "%Y-%m-%d").date()
+                    f_pago = datetime.strptime(str(row['Fecha Pago (YYYY-MM-DD)']).strip(), "%Y-%m-%d").date()
+                    v_fob = float(row.get('Valor FOB', 0.0))
+                    v_gas = float(row.get('Valor Gastos', 0.0))
+                    
+                    prov_map, ciu, pais = buscar_en_base_datos(row['Proveedor'], df_proveedores)
+                    n_fob = calcular_numeral_fob(f_bl, f_pago)
+                    
+                    mn_txt = f" MN {str(row['Motonave']).upper()}" if pd.notna(row['Motonave']) else ""
+                    f_bl_fmt = f_bl.strftime("%d/%m/%Y")
+                    f_pago_fmt = f_pago.strftime("%d/%m/%Y")
+                    
+                    # CÁLCULO DEL TOTAL
+                    total_pago = v_fob + v_gas
+                    total_fmt = format_moneda_co(total_pago)
+                    
+                    filas_temp = []
+                    if v_fob > 0:
+                        prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
+                        glosa_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt} BL N° {row['BL']} DEL {f_bl_fmt} PROVEEDOR {prov_map}"
+                        filas_temp.append({
+                            "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
+                            "Texto legalizacion": glosa_fob, "saldo": "", "estado": "CREADA"
+                        })
+                    
+                    if v_gas > 0:
+                        glosa_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt} BL N° {row['BL']} DEL {f_bl_fmt} PROVEEDOR {prov_map}"
+                        filas_temp.append({
+                            "Fecha de pago": f_pago_fmt, "numeral": "2016", "Valor": v_gas,
+                            "Texto legalizacion": glosa_gas, "saldo": "", "estado": "CREADA"
+                        })
+                    
+                    # Ordenar las filas generadas por esta factura específica
+                    filas_temp.sort(key=lambda x: int(x["numeral"]))
+                    nuevas_filas.extend(filas_temp)
+                    
+                    barra_progreso.progress((idx + 1) / len(df_lote))
+                
+                st.session_state.historial_legalizaciones = pd.concat(
+                    [st.session_state.historial_legalizaciones, pd.DataFrame(nuevas_filas)], 
+                    ignore_index=True
+                )
+                st.success("Lote procesado. Revisa la grilla en la parte inferior.")
+                
+        except Exception as e:
+            st.error(f"Error procesando el archivo. Verifica las columnas de fechas. Detalle: {e}")
 
 # =======================================================================
-# 🗃️ GRILLA GLOBAL DE SALIDA Y EXPORTACIÓN
+# 🗃️ GLOBAL DE SALIDA Y EXPORTACIÓN
 # =======================================================================
 st.markdown("---")
 st.markdown("### 📑 Grilla Consolidada para SICOMP")
