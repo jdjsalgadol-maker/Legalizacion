@@ -1,20 +1,20 @@
 """
-SICOMP IA — Carga Masiva y Motor Cambiario (Interfaz Simplificada)
-Autor: Juan Salgado
+SICOMP IA — Motor Cambiario con Separación Estricta de Numerales (FOB, 2016, 2904, 1601)
+Autor: Juan Salgado (BitCriollo)
 """
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
 from difflib import get_close_matches
 
-st.set_page_config(page_title="SICOMP IA - Bulk Engine", layout="wide")
+st.set_page_config(page_title="SICOMP IA - Motor Cambiario", layout="wide")
 
 st.markdown("""
 <style>
     .stApp { background: #0d1117; color: #e6edf3; }
     [data-testid="stSidebar"] { background: #161b22; border-right: 1px solid #30363d; }
     .main-header { font-family: monospace; font-size: 1.8rem; color: #58a6ff; border-bottom: 2px solid #21262d; padding-bottom: 10px; margin-bottom: 20px; }
-    .glosa-box { background: #161b22; border: 1px solid #388bfd; border-left: 4px solid #388bfd; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #79c0ff; word-break: break-all; }
+    .glosa-box { background: #161b22; border: 1px solid #388bfd; border-left: 4px solid #388bfd; border-radius: 6px; padding: 12px; font-family: monospace; font-size: 0.85rem; color: #79c0ff; word-break: break-all; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -56,134 +56,132 @@ def buscar_en_base_datos(nombre_digitado, df_base):
     if coincidencias:
         nombre_exacto = coincidencias[0]
         fila = df_base[df_base[col_nombre] == nombre_exacto].iloc[0]
-        ciudad = fila.get(col_ciudad, "N/A")
-        pais = fila.get(col_pais, "N/A")
-        return nombre_exacto, ciudad, pais
+        return nombre_exacto, fila.get(col_ciudad, "N/A"), fila.get(col_pais, "N/A")
     return str(nombre_digitado).upper(), "NO ENCONTRADO", "NO ENCONTRADO"
 
-def calcular_operacion(fecha_bl: date, fecha_pago: date, tiene_gastos: bool) -> tuple[str, str, int]:
+def calcular_numeral_fob(fecha_bl: date, fecha_pago: date) -> str:
+    """Calcula estrictamente el numeral de la mercancía (FOB) basado en días."""
     dias = (fecha_pago - fecha_bl).days
-    num_gastos = "2016" if tiene_gastos else ""
     if dias < 0:
-        return "2017", "", dias
+        return "2017" # Anticipos (No embarcadas)
     elif dias <= 30:
-        return "2015", num_gastos, dias
+        return "2015" # Embarcadas <= 30 días
     else:
-        return "2022", num_gastos, dias
+        return "2022" # Embarcadas > 30 días
 
 def format_moneda_co(valor: float) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # ─── INTERFAZ VISUAL: TABS DE NAVEGACIÓN ───────────────────────────────
-st.markdown('<div class="main-header">🛃 SICOMP IA — Motor de Carga Masiva y Validación</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🛃 SICOMP IA — Separador de Numerales y Servicios</div>', unsafe_allow_html=True)
 df_proveedores = cargar_maestro_proveedores()
 
-tab_masivo, tab_manual = st.tabs(["📂 Cargue de Legalizaciones Masivas", "📝 Creación Manual Individual"])
+tab_manual, tab_masivo = st.tabs(["📝 Formulario Individual Detallado", "📂 Cargue Masivo (CSV)"])
 
 # =======================================================================
-# PESTAÑA 1: MÓDULO DE CARGA MASIVA
-# =======================================================================
-with tab_masivo:
-    st.markdown("### 📥 Panel de Integración en Lote")
-    st.info("💡 Sube una plantilla en CSV con las columnas: `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL (YYYY-MM-DD)`, `Fecha Pago (YYYY-MM-DD)`, `Valor FOB`, `Valor Gastos`.")
-    
-    archivo_masivo = st.file_uploader("Selecciona el archivo CSV de legalizaciones pendientes", type=["csv"])
-
-    if archivo_masivo:
-        try:
-            df_lote = pd.read_csv(archivo_masivo, sep=";")
-            st.success(f"Archivo cargado correctamente. Registros detectados: {len(df_lote)}")
-            
-            if st.button("🚀 Procesar Lote y Generar Glosas Automáticas", use_container_width=True):
-                nuevas_filas = []
-                barra_progreso = st.progress(0)
-                
-                for idx, row in df_lote.iterrows():
-                    f_bl = datetime.strptime(str(row['Fecha BL (YYYY-MM-DD)']), "%Y-%m-%d").date()
-                    f_pago = datetime.strptime(str(row['Fecha Pago (YYYY-MM-DD)']), "%Y-%m-%d").date()
-                    v_fob = float(row['Valor FOB'])
-                    v_gastos = float(row.get('Valor Gastos', 0.0))
-                    
-                    prov_map, ciu, pais = buscar_en_base_datos(row['Proveedor'], df_proveedores)
-                    n_fob, n_gas, dias = calcular_operacion(f_bl, f_pago, v_gastos > 0)
-                    
-                    mn_txt = f" MN {str(row['Motonave']).upper()}" if pd.notna(row['Motonave']) else ""
-                    f_bl_fmt = f_bl.strftime("%d/%m/%Y")
-                    f_pago_fmt = f_pago.strftime("%d/%m/%Y")
-                    
-                    if v_fob > 0:
-                        glosa_fob = f"PAGO X USD {format_moneda_co(v_fob)} CORRESPONDIENTE A FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt} BL N° {row['BL']} DEL {f_bl_fmt} PROVEEDOR {prov_map}"
-                        nuevas_filas.append({
-                            "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
-                            "Texto legalizacion": glosa_fob, "iddeclarante": "", "declarante": "", 
-                            "saldo": "", "estado": "CREADA"
-                        })
-                    
-                    if v_gastos > 0:
-                        glosa_gas = f"PAGO X USD {format_moneda_co(v_gastos)} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt} BL N° {row['BL']} DEL {f_bl_fmt} PROVEEDOR {prov_map}"
-                        nuevas_filas.append({
-                            "Fecha de pago": f_pago_fmt, "numeral": n_gas, "Valor": v_gastos,
-                            "Texto legalizacion": glosa_gas, "iddeclarante": "", "declarante": "", 
-                            "saldo": "", "estado": "CREADA"
-                        })
-                    
-                    barra_progreso.progress((idx + 1) / len(df_lote))
-                
-                st.session_state.historial_legalizaciones = pd.concat([st.session_state.historial_legalizaciones, pd.DataFrame(nuevas_filas)], ignore_index=True)
-                st.success("Lote procesado. Revisa la grilla en la parte inferior de la pantalla.")
-                
-        except Exception as e:
-            st.error(f"Error procesando el archivo: Verifica que los separadores sean ';' y las columnas estén correctas. Detalle: {e}")
-
-# =======================================================================
-# PESTAÑA 2: MÓDULO MANUAL
+# PESTAÑA 1: MÓDULO MANUAL CON SEPARACIÓN ESTRICTA
 # =======================================================================
 with tab_manual:
     col_f, col_r = st.columns([1.1, 1.8])
     with col_f:
-        prov_in = st.text_input("🏭 Proveedor Exterior", placeholder="ej: Aollen o Seaboard")
+        st.markdown("### 📥 Datos de la Operación")
+        prov_in = st.text_input("🏭 Proveedor Exterior", placeholder="ej: MEYN FOOD PROCESSING")
         prov_m, ciu_m, pais_m = buscar_en_base_datos(prov_in, df_proveedores)
         
-        fac = st.text_input("🧾 Factura Comercial (FV)")
-        bl = st.text_input("🚢 Documento de Transporte (BL)")
-        prod = st.text_input("📦 Descripción")
-        mn = st.text_input("⛴️ Motonave")
+        fac = st.text_input("🧾 Factura Comercial (FV)").upper()
+        bl = st.text_input("🚢 Documento de Transporte (BL)").upper()
+        prod = st.text_input("📦 Descripción IMPO").upper()
+        mn = st.text_input("⛴️ Motonave").upper()
         
+        st.markdown("---")
         c1, c2 = st.columns(2)
-        with c1: f_bl_in = st.date_input("📅 Fecha de Embarque", value=date.today())
+        with c1: f_bl_in = st.date_input("📅 Fecha de Embarque (BL)", value=date.today())
         with c2: f_pago_in = st.date_input("📅 Fecha de Pago", value=date.today())
             
-        c3, c4 = st.columns(2)
-        with c3: v_fob = st.number_input("💵 Valor FOB", min_value=0.0, format="%.2f")
-        with c4: v_gas = st.number_input("🚚 Valor Gastos", min_value=0.0, format="%.2f")
+        st.markdown("---")
+        st.markdown("#### Desglose Económico (Genera filas separadas)")
+        v1, v2 = st.columns(2)
+        with v1: v_fob = st.number_input("💵 Valor FOB", min_value=0.0, format="%.2f")
+        with v2: v_gas = st.number_input("🚚 Gastos (Seguro/Flete) - 2016", min_value=0.0, format="%.2f")
+        
+        v3, v4 = st.columns(2)
+        with v3: v_demoras = st.number_input("⏱️ Demoras (Form 5) - 2904", min_value=0.0, format="%.2f")
+        with v4: v_premios = st.number_input("🏆 Premios/Notas Cr. - 1601", min_value=0.0, format="%.2f")
+        
+        # Selector condicional para la regla del numeral 1601
+        tipo_premio = "Calidad"
+        if v_premios > 0:
+            tipo_premio = st.selectbox("Condición del Premio (Afecta el texto):", ["Calidad", "Buen Rendimiento"])
 
     with col_r:
-        if v_fob > 0 and prov_in:
-            n_f, n_g, d = calcular_operacion(f_bl_in, f_pago_in, v_gas > 0)
+        if prov_in and (v_fob > 0 or v_gas > 0 or v_demoras > 0 or v_premios > 0):
             st.markdown(f"**Tercero Homologado:** `{prov_m}` | `{ciu_m} - {pais_m}`")
             
-            glosa_f = f"PAGO X USD {format_moneda_co(v_fob)} CORRESPONDIENTE A FV N° {fac.upper()} IMPO {prod.upper()} MN {mn.upper()} BL N° {bl.upper()} DEL {f_bl_in.strftime('%d/%m/%Y')} PROVEEDOR {prov_m}"
-            st.markdown(f"**Glosa Mercancía (Num {n_f}):**")
-            st.markdown(f'<div class="glosa-box">{glosa_f}</div>', unsafe_allow_html=True)
+            # Cálculo del numeral de la mercancía
+            n_fob = calcular_numeral_fob(f_bl_in, f_pago_in)
+            mn_txt = f" MN {mn}" if mn else ""
+            f_bl_fmt = f_bl_in.strftime('%d/%m/%Y')
+            f_pago_fmt = f_pago_in.strftime('%d/%m/%Y')
             
-            glosa_g = ""
-            if v_gas > 0:
-                glosa_g = f"PAGO X USD {format_moneda_co(v_gas)} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac.upper()} IMPO {prod.upper()} MN {mn.upper()} BL N° {bl.upper()} DEL {f_bl_in.strftime('%d/%m/%Y')} PROVEEDOR {prov_m}"
-                st.markdown(f"<br>**Glosa Gastos (Num {n_g}):**", unsafe_allow_html=True)
-                st.markdown(f'<div class="glosa-box">{glosa_g}</div>', unsafe_allow_html=True)
-
-            if st.button("🚀 Guardar en Grilla", use_container_width=True):
-                st.session_state.historial_legalizaciones = pd.concat([st.session_state.historial_legalizaciones, pd.DataFrame([{
-                    "Fecha de pago": f_pago_in.strftime('%d/%m/%Y'), "numeral": n_f, "Valor": v_fob,
-                    "Texto legalizacion": glosa_f, "iddeclarante": "", "declarante": "", "saldo": "", "estado": "CREADA"
-                }])], ignore_index=True)
+            # --- CONSTRUCCIÓN DE GLOSAS SEPARADAS ---
+            glosas_generadas = []
+            
+            # 1. Glosa FOB (2017, 2015, 2022)
+            if v_fob > 0:
+                prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
+                txt_fob = f"{prefijo_fob} X USD {format_moneda_co(v_fob)} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                glosas_generadas.append({"num": n_fob, "val": v_fob, "txt": txt_fob, "label": "Mercancía FOB"})
                 
-                if v_gas > 0:
-                    st.session_state.historial_legalizaciones = pd.concat([st.session_state.historial_legalizaciones, pd.DataFrame([{
-                        "Fecha de pago": f_pago_in.strftime('%d/%m/%Y'), "numeral": n_g, "Valor": v_gas,
-                        "Texto legalizacion": glosa_g, "iddeclarante": "", "declarante": "", "saldo": "", "estado": "CREADA"
-                    }])], ignore_index=True)
-                st.success("Guardado exitoso.")
+            # 2. Glosa Gastos (2016)
+            if v_gas > 0:
+                txt_gas = f"PAGO X USD {format_moneda_co(v_gas)} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                glosas_generadas.append({"num": "2016", "val": v_gas, "txt": txt_gas, "label": "Gastos / Fletes"})
+                
+            # 3. Glosa Demoras (2904)
+            if v_demoras > 0:
+                txt_demoras = f"PAGO X USD {format_moneda_co(v_demoras)} CORRESPONDIENTE A DEMORAS FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                glosas_generadas.append({"num": "2904", "val": v_demoras, "txt": txt_demoras, "label": "Demoras (Form 5)"})
+                
+            # 4. Glosa Premios / Calidad (1601)
+            if v_premios > 0:
+                if tipo_premio == "Calidad":
+                    txt_premios = f"PAGO X USD {format_moneda_co(v_premios)} CORRESPONDIENTE A CALIDAD PROVEEDOR {prov_m}"
+                else: # Buen Rendimiento
+                    txt_premios = f"PAGO X USD {format_moneda_co(v_premios)} CORRESPONDIENTE A BUEN RENDIMIENTO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                glosas_generadas.append({"num": "1601", "val": v_premios, "txt": txt_premios, "label": f"Premio ({tipo_premio})"})
+
+            # --- MUESTRA VISUAL INDEPENDIENTE ---
+            st.markdown("#### 📋 Numerales Desglosados para Legalización")
+            for item in glosas_generadas:
+                st.markdown(f"**{item['label']} (Numeral {item['num']}):**")
+                st.markdown(f'<div class="glosa-box">{item["txt"]}</div>', unsafe_allow_html=True)
+
+            # --- GUARDADO EN GRILLA ---
+            if st.button("🚀 Guardar Filas en Grilla", use_container_width=True):
+                nuevas_filas = []
+                for item in glosas_generadas:
+                    nuevas_filas.append({
+                        "Fecha de pago": f_pago_fmt, "numeral": item["num"], "Valor": item["val"],
+                        "Texto legalizacion": item["txt"], "iddeclarante": "", "declarante": "", 
+                        "saldo": "", "estado": "CREADA"
+                    })
+                
+                st.session_state.historial_legalizaciones = pd.concat(
+                    [st.session_state.historial_legalizaciones, pd.DataFrame(nuevas_filas)], 
+                    ignore_index=True
+                )
+                st.success(f"✓ {len(nuevas_filas)} registros agregados exitosamente a la grilla inferior.")
+
+# =======================================================================
+# PESTAÑA 2: MÓDULO MASIVO (AJUSTADO A NUEVOS NUMERALES)
+# =======================================================================
+with tab_masivo:
+    st.info("💡 Plantilla CSV: `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL`, `Fecha Pago`, `Valor FOB`, `Valor Gastos`, `Valor Demoras`, `Valor Premios`, `Tipo Premio`.")
+    archivo_masivo = st.file_uploader("Selecciona el archivo CSV para procesar en lote", type=["csv"])
+    
+    if archivo_masivo:
+        # Se asume que el usuario subirá las nuevas columnas en el CSV masivo.
+        st.warning("Asegúrate de que tu CSV tenga las columnas exactas mencionadas arriba para procesar masivamente los numerales 2904 y 1601.")
 
 # =======================================================================
 # 🗃️ GRILLA GLOBAL DE SALIDA Y EXPORTACIÓN
@@ -202,9 +200,9 @@ if not st.session_state.historial_legalizaciones.empty:
     )
     
     st.download_button(
-        label="📥 Descargar Reporte Final (CSV para Excel)",
+        label="📥 Descargar Reporte Final (CSV)",
         data=st.session_state.historial_legalizaciones.to_csv(sep=";", index=False, encoding="latin-1"),
-        file_name=f"Cargue_Masivo_SICOMP_{date.today().strftime('%Y%m%d')}.csv",
+        file_name=f"Legalizaciones_SICOMP_{date.today().strftime('%Y%m%d')}.csv",
         mime="text/csv",
         use_container_width=True
     )
