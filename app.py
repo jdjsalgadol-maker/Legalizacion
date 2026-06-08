@@ -1,5 +1,5 @@
 """
-SICOMP IA — Motor Cambiario Ordenado (Num. Ascendente)
+SICOMP IA — Motor Cambiario Simplificado (Solo FOB y Gastos, Orden Ascendente)
 Autor: Juan Salgado
 """
 import streamlit as st
@@ -17,7 +17,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─── INICIALIZACIÓN DE LA GRILLA HISTÓRICA (Sin datos de declarante) ───
+# ─── INICIALIZACIÓN DE LA GRILLA HISTÓRICA ─────────────────────────────
 if "historial_legalizaciones" not in st.session_state:
     st.session_state.historial_legalizaciones = pd.DataFrame(columns=[
         "Fecha de pago", "numeral", "Valor", "Texto legalizacion", "saldo", "estado"
@@ -78,7 +78,7 @@ df_proveedores = cargar_maestro_proveedores()
 tab_manual, tab_masivo = st.tabs(["📝 Generador de Operación Individual", "📂 Cargue Masivo en Lote"])
 
 # =======================================================================
-# PESTAÑA 1: MÓDULO MANUAL CON ORDEN ASCENDENTE
+# PESTAÑA 1: MÓDULO MANUAL (SÓLO FOB Y GASTOS)
 # =======================================================================
 with tab_manual:
     col_f, col_r = st.columns([1.1, 1.8])
@@ -98,20 +98,13 @@ with tab_manual:
             
         st.markdown("---")
         st.markdown("#### Ingreso de Valores (USD)")
+        # Solo se mantienen los campos de FOB y Gastos
         v1, v2 = st.columns(2)
         with v1: v_fob = st.number_input("💵 Valor FOB", min_value=0.0, format="%.2f")
         with v2: v_gas = st.number_input("🚚 Gastos (Flete/Seguro)", min_value=0.0, format="%.2f")
-        
-        v3, v4 = st.columns(2)
-        with v3: v_demoras = st.number_input("⏱️ Demoras (Servicios)", min_value=0.0, format="%.2f")
-        with v4: v_premios = st.number_input("🏆 Premios / Calidad", min_value=0.0, format="%.2f")
-        
-        tipo_premio = "Calidad"
-        if v_premios > 0:
-            tipo_premio = st.selectbox("Condición del Premio:", ["Calidad", "Buen Rendimiento"])
 
     with col_r:
-        if prov_in and (v_fob > 0 or v_gas > 0 or v_demoras > 0 or v_premios > 0):
+        if prov_in and (v_fob > 0 or v_gas > 0):
             st.markdown("### 📊 Previsualización y Ordenamiento Automático")
             st.markdown(f"**Tercero Mapeado:** `{prov_m}` | `{ciu_m} - {pais_m}`")
             
@@ -122,19 +115,8 @@ with tab_manual:
             
             # --- CONSTRUCCIÓN DEL ARRAY DE GLOSAS ---
             filas_generadas = []
-            
-            # 1. Glosa Premios (1601)
-            if v_premios > 0:
-                if tipo_premio == "Calidad":
-                    txt_premios = f"PAGO X USD {format_moneda_co(v_premios)} CORRESPONDIENTE A CALIDAD PROVEEDOR {prov_m}"
-                else: 
-                    txt_premios = f"PAGO X USD {format_moneda_co(v_premios)} CORRESPONDIENTE A BUEN RENDIMIENTO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
-                filas_generadas.append({
-                    "Fecha de pago": f_pago_fmt, "numeral": "1601", "Valor": v_premios,
-                    "Texto legalizacion": txt_premios, "saldo": "", "estado": "CREADA"
-                })
 
-            # 2. Glosa FOB (2015, 2017, 2022)
+            # 1. Glosa FOB (2015, 2017, 2022)
             if v_fob > 0:
                 prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
                 txt_fob = f"{prefijo_fob} X USD {format_moneda_co(v_fob)} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
@@ -143,7 +125,7 @@ with tab_manual:
                     "Texto legalizacion": txt_fob, "saldo": "", "estado": "CREADA"
                 })
                 
-            # 3. Glosa Gastos (2016)
+            # 2. Glosa Gastos (2016)
             if v_gas > 0:
                 txt_gas = f"PAGO X USD {format_moneda_co(v_gas)} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
                 filas_generadas.append({
@@ -151,16 +133,7 @@ with tab_manual:
                     "Texto legalizacion": txt_gas, "saldo": "", "estado": "CREADA"
                 })
                 
-            # 4. Glosa Demoras (2904)
-            if v_demoras > 0:
-                txt_demoras = f"PAGO X USD {format_moneda_co(v_demoras)} CORRESPONDIENTE A DEMORAS FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
-                filas_generadas.append({
-                    "Fecha de pago": f_pago_fmt, "numeral": "2904", "Valor": v_demoras,
-                    "Texto legalizacion": txt_demoras, "saldo": "", "estado": "CREADA"
-                })
-                
             # --- ORDENAMIENTO ASCENDENTE POR NUMERAL ---
-            # Convierte temporalmente el numeral a entero para que 1601 quede primero, luego los 2000s, luego 2904
             filas_generadas.sort(key=lambda x: int(x["numeral"]))
             
             # --- MOSTRAR CUADRO PRINCIPAL LIMPIO ---
@@ -179,13 +152,13 @@ with tab_manual:
 # PESTAÑA 2: MÓDULO MASIVO
 # =======================================================================
 with tab_masivo:
-    st.info("💡 Plantilla CSV: `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL`, `Fecha Pago`, `Valor FOB`, `Valor Gastos`, `Valor Demoras`, `Valor Premios`, `Tipo Premio`.")
+    st.info("💡 Plantilla CSV: `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL`, `Fecha Pago`, `Valor FOB`, `Valor Gastos`.")
     archivo_masivo = st.file_uploader("Selecciona el archivo CSV para procesar en lote", type=["csv"])
     if archivo_masivo:
         st.warning("Asegúrate de que tu CSV tenga las columnas exactas para ejecutar la regla de ordenamiento automático.")
 
 # =======================================================================
-# 🗃️ GRILLA GLOBAL DE SALIDA Y EXPORTACIÓN (Sin columnas basura)
+# 🗃️ GRILLA GLOBAL DE SALIDA Y EXPORTACIÓN
 # =======================================================================
 st.markdown("---")
 st.markdown("### 📑 Grilla Consolidada para SICOMP")
