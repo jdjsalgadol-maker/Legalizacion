@@ -227,7 +227,7 @@ with tab_manual:
             st.markdown("#### Cuadro de Numerales a Procesar")
             st.dataframe(df_preview[["numeral", "Valor", "Texto legalizacion"]], use_container_width=True, hide_index=True)
 
-            if st.button("🚀 Guardar Operación en Grilla", use_container_width=True, type="primary"):
+            if st.button("🚀 Guardar Operación", use_container_width=True, type="primary"):
                 st.session_state.historial_legalizaciones = pd.concat(
                     [st.session_state.historial_legalizaciones, df_preview], 
                     ignore_index=True
