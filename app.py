@@ -9,7 +9,7 @@ from datetime import datetime, date
 from difflib import get_close_matches
 
 # Configuración de página inicial
-st.set_page_config(page_title="SICOMP IA - Motor Cambiario", page_icon="🛃", layout="wide")
+st.set_page_config(page_title="Legalizacion de pagos", page_icon="🛃", layout="wide")
 
 # Estilos personalizados en Dark Mode
 st.markdown("""
