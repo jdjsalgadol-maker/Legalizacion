@@ -1,5 +1,5 @@
 """
-SICOMP IA — Motor Cambiario (Versión Definitiva)
+Pre validador (Versión Definitiva)
 Autor: Juan Salgado (BitCriollo)
 Arquitectura: Base de Datos Integrada, Autocompletado, Lógica BL y Fuzzy Matching
 """
