@@ -1,7 +1,7 @@
 """
 SICOMP IA — Motor Cambiario (Versión Definitiva)
 Autor: Juan Salgado (BitCriollo)
-Arquitectura: Base de Datos Integrada, Autocompletado y Fuzzy Matching
+Arquitectura: Base de Datos Integrada, Autocompletado, Lógica BL y Fuzzy Matching
 """
 import streamlit as st
 import pandas as pd
@@ -9,7 +9,7 @@ from datetime import datetime, date
 from difflib import get_close_matches
 
 # Configuración de página inicial
-st.set_page_config(page_title="Legalizacion de pagos", page_icon="🛃", layout="wide")
+st.set_page_config(page_title="SICOMP IA - Motor Cambiario", page_icon="🛃", layout="wide")
 
 # Estilos personalizados en Dark Mode
 st.markdown("""
@@ -126,7 +126,13 @@ def buscar_en_base_datos(nombre_digitado, df_base, modo_exacto=False):
             
     return termino, "NO ENCONTRADO", "NO ENCONTRADO"
 
-def calcular_numeral_fob(fecha_bl: date, fecha_pago: date) -> str:
+def calcular_numeral_fob(bl_text: str, fecha_bl: date, fecha_pago: date) -> str:
+    """Calcula el numeral FOB. Si no hay BL, se asume forzosamente como Anticipo."""
+    # Validación: Si el usuario no digitó BL o está vacío, es Anticipo
+    if not bl_text or str(bl_text).upper() == "NAN":
+        return "2017" # Anticipo por ausencia de embarque
+
+    # Si hay BL, calculamos por diferencia de días
     dias = (fecha_pago - fecha_bl).days
     if dias < 0:
         return "2017" # Anticipo
@@ -192,7 +198,8 @@ with tab_manual:
             }])
             st.dataframe(df_datos_pago, hide_index=True, use_container_width=True)
             
-            n_fob = calcular_numeral_fob(f_bl_in, f_pago_in)
+            # Le pasamos la variable 'bl' a la nueva función de lógica de anticipos
+            n_fob = calcular_numeral_fob(bl, f_bl_in, f_pago_in)
             mn_txt = f" MN {mn}" if mn else ""
             f_bl_fmt = f_bl_in.strftime('%d/%m/%Y')
             f_pago_fmt = f_pago_in.strftime('%d/%m/%Y')
@@ -202,18 +209,27 @@ with tab_manual:
             
             filas_generadas = []
 
-            # Glosa FOB
+            # ─── Glosa FOB ───
             if v_fob > 0:
                 prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
-                txt_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                
+                # Adaptación inteligente del texto si no hay BL
+                if bl:
+                    txt_bl = f" BL N° {bl} DEL {f_bl_fmt}"
+                else:
+                    txt_bl = " (SIN EMBARCAR)"
+
+                txt_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt}{txt_bl} PROVEEDOR {prov_m}"
                 filas_generadas.append({
                     "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
                     "Texto legalizacion": txt_fob, "saldo": "", "estado": "CREADA"
                 })
                 
-            # Glosa Gastos (Flete/Seguro - 2016)
+            # ─── Glosa Gastos (Flete/Seguro - 2016) ───
             if v_gas > 0:
-                txt_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt} BL N° {bl} DEL {f_bl_fmt} PROVEEDOR {prov_m}"
+                # La glosa de gastos mantiene su propia estructura pero adapta el BL si es necesario
+                txt_bl_gas = f" BL N° {bl} DEL {f_bl_fmt}" if bl else " (SIN EMBARCAR)"
+                txt_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt}{txt_bl_gas} PROVEEDOR {prov_m}"
                 filas_generadas.append({
                     "Fecha de pago": f_pago_fmt, "numeral": "2016", "Valor": v_gas,
                     "Texto legalizacion": txt_gas, "saldo": "", "estado": "CREADA"
@@ -227,7 +243,7 @@ with tab_manual:
             st.markdown("#### Cuadro de Numerales a Procesar")
             st.dataframe(df_preview[["numeral", "Valor", "Texto legalizacion"]], use_container_width=True, hide_index=True)
 
-            if st.button("🚀 Guardar Operación", use_container_width=True, type="primary"):
+            if st.button("🚀 Guardar Operación en Grilla", use_container_width=True, type="primary"):
                 st.session_state.historial_legalizaciones = pd.concat(
                     [st.session_state.historial_legalizaciones, df_preview], 
                     ignore_index=True
@@ -235,7 +251,7 @@ with tab_manual:
                 st.success("✓ Registros agregados exitosamente en la grilla inferior.")
 
 # =======================================================================
-# PESTAÑA 2: MÓDULO MASIVO (Con Lógica Difusa)
+# PESTAÑA 2: MÓDULO MASIVO (Con Lógica Difusa y Validación BL)
 # =======================================================================
 with tab_masivo:
     st.info("💡 Plantilla CSV (`Separador Coma ','`): `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL (YYYY-MM-DD)`, `Fecha Pago (YYYY-MM-DD)`, `Valor FOB`, `Valor Gastos`.")
@@ -260,7 +276,13 @@ with tab_masivo:
                     
                     # Búsqueda difusa activada: Si el CSV dice "CAI TRADING", mapeará a "CAI TRADING LLC"
                     prov_map, _, _ = buscar_en_base_datos(row['Proveedor'], df_proveedores, modo_exacto=False)
-                    n_fob = calcular_numeral_fob(f_bl, f_pago)
+                    
+                    # Extraer el BL limpiamente del CSV
+                    bl_val = str(row['BL']).upper().strip() if pd.notna(row['BL']) else ""
+                    if bl_val == "NAN": bl_val = ""
+                    
+                    # Llamar la nueva función de lógica de anticipos
+                    n_fob = calcular_numeral_fob(bl_val, f_bl, f_pago)
                     
                     mn_txt = f" MN {str(row['Motonave']).upper()}" if pd.notna(row['Motonave']) else ""
                     f_bl_fmt = f_bl.strftime("%d/%m/%Y")
@@ -272,14 +294,19 @@ with tab_masivo:
                     filas_temp = []
                     if v_fob > 0:
                         prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
-                        glosa_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt} BL N° {row['BL']} DEL {f_bl_fmt} PROVEEDOR {prov_map}"
+                        
+                        # Adaptación inteligente del texto para el lote masivo
+                        txt_bl_lote = f" BL N° {bl_val} DEL {f_bl_fmt}" if bl_val else " (SIN EMBARCAR)"
+                        
+                        glosa_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt}{txt_bl_lote} PROVEEDOR {prov_map}"
                         filas_temp.append({
                             "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
                             "Texto legalizacion": glosa_fob, "saldo": "", "estado": "CREADA"
                         })
                     
                     if v_gas > 0:
-                        glosa_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt} BL N° {row['BL']} DEL {f_bl_fmt} PROVEEDOR {prov_map}"
+                        txt_bl_lote_gas = f" BL N° {bl_val} DEL {f_bl_fmt}" if bl_val else " (SIN EMBARCAR)"
+                        glosa_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt}{txt_bl_lote_gas} PROVEEDOR {prov_map}"
                         filas_temp.append({
                             "Fecha de pago": f_pago_fmt, "numeral": "2016", "Valor": v_gas,
                             "Texto legalizacion": glosa_gas, "saldo": "", "estado": "CREADA"
