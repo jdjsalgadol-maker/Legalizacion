@@ -1,7 +1,7 @@
 """
-Pre validador (Versión Definitiva)
-Autor: Juan Salgado
-Arquitectura: Base de Datos Integrada, Autocompletado, Lógica BL y Fuzzy Matching
+Pre validador para legalizar
+Autor: Juan Salgado 
+Pwr Automate
 """
 import streamlit as st
 import pandas as pd
@@ -31,7 +31,6 @@ if "historial_legalizaciones" not in st.session_state:
 # ─── 2. NÚCLEO DE BASE DE DATOS Y LÓGICA CAMBIARIA ─────────────────────
 @st.cache_data
 def cargar_maestro_proveedores():
-    """Carga la base de datos de proveedores directamente en memoria para máxima velocidad."""
     raw_data = [
         {"NOMBRE": "ADISSEO FRANCE S A S", "CIUDAD": "PARIS", "PAÍS": "FRANCIA"},
         {"NOMBRE": "ADM AMERICAS S DE RL", "CIUDAD": "NEW YORK", "PAÍS": "ESTADOS UNIDOS"},
@@ -98,13 +97,11 @@ def cargar_maestro_proveedores():
         {"NOMBRE": "SCANICO A/S", "CIUDAD": "AABENRAA", "PAÍS": "DINAMARCA"}
     ]
     df = pd.DataFrame(raw_data)
-    # Estandarizar a mayúsculas
     for col in df.columns:
         df[col] = df[col].astype(str).str.strip().str.upper()
     return df
 
 def buscar_en_base_datos(nombre_digitado, df_base, modo_exacto=False):
-    """Busca al proveedor. Si modo_exacto es False, usa Lógica Difusa para tolerar errores."""
     if pd.isna(nombre_digitado) or str(nombre_digitado).strip() == "" or df_base.empty:
         return "N/A", "N/A", "N/A"
         
@@ -117,7 +114,6 @@ def buscar_en_base_datos(nombre_digitado, df_base, modo_exacto=False):
             fila = coincidencias.iloc[0]
             return fila["NOMBRE"], fila.get("CIUDAD", "N/A"), fila.get("PAÍS", "N/A")
     else:
-        # Lógica Difusa (Fuzzy Matching): ideal para el cargue masivo donde el CSV puede traer errores
         mejores_match = get_close_matches(termino, lista_proveedores, n=1, cutoff=0.50)
         if mejores_match:
             nombre_exacto = mejores_match[0]
@@ -127,19 +123,15 @@ def buscar_en_base_datos(nombre_digitado, df_base, modo_exacto=False):
     return termino, "NO ENCONTRADO", "NO ENCONTRADO"
 
 def calcular_numeral_fob(bl_text: str, fecha_bl: date, fecha_pago: date) -> str:
-    """Calcula el numeral FOB. Si no hay BL, se asume forzosamente como Anticipo."""
-    # Validación: Si el usuario no digitó BL o está vacío, es Anticipo
     if not bl_text or str(bl_text).upper() == "NAN":
-        return "2017" # Anticipo por ausencia de embarque
-
-    # Si hay BL, calculamos por diferencia de días
+        return "2017" # Anticipo
     dias = (fecha_pago - fecha_bl).days
     if dias < 0:
-        return "2017" # Anticipo
+        return "2017"
     elif dias <= 30:
-        return "2015" # Corto Plazo (diferido < 30 días)
+        return "2015"
     else:
-        return "2022" # Financiado
+        return "2022"
 
 def format_moneda_co(valor: float) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -151,7 +143,7 @@ df_proveedores = cargar_maestro_proveedores()
 tab_manual, tab_masivo = st.tabs(["📝 Generador de Operación Individual", "📂 Cargue Masivo en Lote"])
 
 # =======================================================================
-# PESTAÑA 1: MÓDULO MANUAL (Con Selectbox Autocompletable)
+# PESTAÑA 1: MÓDULO MANUAL
 # =======================================================================
 with tab_manual:
     col_f, col_r = st.columns([1.1, 1.8])
@@ -160,15 +152,13 @@ with tab_manual:
         
         lista_opciones = df_proveedores["NOMBRE"].tolist()
         
-        # Componente Selectbox (Soporta escritura y búsqueda inmediata)
         prov_in = st.selectbox(
             "🏭 Proveedor Exterior (Escribe para buscar)",
             options=lista_opciones,
-            index=None,  # Inicia vacío para no forzar un proveedor al cargar
+            index=None,
             placeholder="Escribe o selecciona el nombre..."
         )
         
-        # Como es un selectbox, la búsqueda es exacta.
         prov_m, ciu_m, pais_m = buscar_en_base_datos(prov_in, df_proveedores, modo_exacto=True)
         
         fac = st.text_input("🧾 Factura Comercial (FV)", placeholder="Ej: INV-2024").upper().strip()
@@ -177,8 +167,15 @@ with tab_manual:
         mn = st.text_input("⛴️ Motonave", placeholder="Ej: MSC GAYANE").upper().strip()
         
         c1, c2 = st.columns(2)
-        with c1: f_bl_in = st.date_input("📅 Fecha Embarque (BL)", value=date.today())
-        with c2: f_pago_in = st.date_input("📅 Fecha Pago", value=date.today())
+        with c1: 
+            # Calendario bloqueado dinámicamente si no hay BL escrito
+            f_bl_in = st.date_input(
+                "📅 Fecha Embarque (BL)", 
+                value=date.today(), 
+                disabled=not bool(bl)
+            )
+        with c2: 
+            f_pago_in = st.date_input("📅 Fecha Pago", value=date.today())
             
         st.markdown("---")
         st.markdown("#### Ingreso de Valores (USD)")
@@ -198,7 +195,6 @@ with tab_manual:
             }])
             st.dataframe(df_datos_pago, hide_index=True, use_container_width=True)
             
-            # Le pasamos la variable 'bl' a la nueva función de lógica de anticipos
             n_fob = calcular_numeral_fob(bl, f_bl_in, f_pago_in)
             mn_txt = f" MN {mn}" if mn else ""
             f_bl_fmt = f_bl_in.strftime('%d/%m/%Y')
@@ -212,30 +208,24 @@ with tab_manual:
             # ─── Glosa FOB ───
             if v_fob > 0:
                 prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
-                
-                # Adaptación inteligente del texto si no hay BL
-                if bl:
-                    txt_bl = f" BL N° {bl} DEL {f_bl_fmt}"
-                else:
-                    txt_bl = " (SIN EMBARCAR)"
-
+                txt_bl = f" BL N° {bl} DEL {f_bl_fmt}" if bl else " (SIN EMBARCAR)"
                 txt_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {fac} IMPO {prod}{mn_txt}{txt_bl} PROVEEDOR {prov_m}"
+                
                 filas_generadas.append({
                     "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
                     "Texto legalizacion": txt_fob, "saldo": "", "estado": "CREADA"
                 })
                 
-            # ─── Glosa Gastos (Flete/Seguro - 2016) ───
+            # ─── Glosa Gastos ───
             if v_gas > 0:
-                # La glosa de gastos mantiene su propia estructura pero adapta el BL si es necesario
                 txt_bl_gas = f" BL N° {bl} DEL {f_bl_fmt}" if bl else " (SIN EMBARCAR)"
                 txt_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {fac} IMPO {prod}{mn_txt}{txt_bl_gas} PROVEEDOR {prov_m}"
+                
                 filas_generadas.append({
                     "Fecha de pago": f_pago_fmt, "numeral": "2016", "Valor": v_gas,
                     "Texto legalizacion": txt_gas, "saldo": "", "estado": "CREADA"
                 })
                 
-            # Ordenamiento nativo Pandas por numeral
             df_preview = pd.DataFrame(filas_generadas)
             df_preview["num_int"] = df_preview["numeral"].astype(int)
             df_preview = df_preview.sort_values("num_int").drop(columns=["num_int"])
@@ -251,7 +241,7 @@ with tab_manual:
                 st.success("✓ Registros agregados exitosamente en la grilla inferior.")
 
 # =======================================================================
-# PESTAÑA 2: MÓDULO MASIVO (Con Lógica Difusa y Validación BL)
+# PESTAÑA 2: MÓDULO MASIVO
 # =======================================================================
 with tab_masivo:
     st.info("💡 Plantilla CSV (`Separador Coma ','`): `Proveedor`, `Factura`, `BL`, `Producto`, `Motonave`, `Fecha BL (YYYY-MM-DD)`, `Fecha Pago (YYYY-MM-DD)`, `Valor FOB`, `Valor Gastos`.")
@@ -267,21 +257,17 @@ with tab_masivo:
                 barra_progreso = st.progress(0)
                 
                 for idx, row in df_lote.iterrows():
-                    # Parseo tolerante de fechas
                     f_bl = pd.to_datetime(row['Fecha BL (YYYY-MM-DD)']).date()
                     f_pago = pd.to_datetime(row['Fecha Pago (YYYY-MM-DD)']).date()
                     
                     v_fob = float(row.get('Valor FOB', 0.0))
                     v_gas = float(row.get('Valor Gastos', 0.0))
                     
-                    # Búsqueda difusa activada: Si el CSV dice "CAI TRADING", mapeará a "CAI TRADING LLC"
                     prov_map, _, _ = buscar_en_base_datos(row['Proveedor'], df_proveedores, modo_exacto=False)
                     
-                    # Extraer el BL limpiamente del CSV
                     bl_val = str(row['BL']).upper().strip() if pd.notna(row['BL']) else ""
                     if bl_val == "NAN": bl_val = ""
                     
-                    # Llamar la nueva función de lógica de anticipos
                     n_fob = calcular_numeral_fob(bl_val, f_bl, f_pago)
                     
                     mn_txt = f" MN {str(row['Motonave']).upper()}" if pd.notna(row['Motonave']) else ""
@@ -294,11 +280,9 @@ with tab_masivo:
                     filas_temp = []
                     if v_fob > 0:
                         prefijo_fob = "ANTICIPO" if n_fob == "2017" else "PAGO"
-                        
-                        # Adaptación inteligente del texto para el lote masivo
                         txt_bl_lote = f" BL N° {bl_val} DEL {f_bl_fmt}" if bl_val else " (SIN EMBARCAR)"
-                        
                         glosa_fob = f"{prefijo_fob} X USD {total_fmt} CORRESPONDIENTE A FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt}{txt_bl_lote} PROVEEDOR {prov_map}"
+                        
                         filas_temp.append({
                             "Fecha de pago": f_pago_fmt, "numeral": n_fob, "Valor": v_fob,
                             "Texto legalizacion": glosa_fob, "saldo": "", "estado": "CREADA"
@@ -307,6 +291,7 @@ with tab_masivo:
                     if v_gas > 0:
                         txt_bl_lote_gas = f" BL N° {bl_val} DEL {f_bl_fmt}" if bl_val else " (SIN EMBARCAR)"
                         glosa_gas = f"PAGO X USD {total_fmt} CORRESPONDIENTE A GASTOS DE FLETE Y SEGURO FV N° {row['Factura']} IMPO {str(row['Producto']).upper()}{mn_txt}{txt_bl_lote_gas} PROVEEDOR {prov_map}"
+                        
                         filas_temp.append({
                             "Fecha de pago": f_pago_fmt, "numeral": "2016", "Valor": v_gas,
                             "Texto legalizacion": glosa_gas, "saldo": "", "estado": "CREADA"
@@ -315,7 +300,6 @@ with tab_masivo:
                     filas_temp.sort(key=lambda x: int(x["numeral"]))
                     nuevas_filas.extend(filas_temp)
                     
-                    # Actualizar barra de progreso
                     barra_progreso.progress((idx + 1) / len(df_lote))
                 
                 if nuevas_filas:
@@ -349,7 +333,6 @@ if not st.session_state.historial_legalizaciones.empty:
     
     col_dl, col_cl = st.columns([1, 1])
     with col_dl:
-        # Codificación 'latin-1' asegura que Excel abra los caracteres especiales (ñ, tildes) en español correctamente
         csv_data = st.session_state.historial_legalizaciones.to_csv(sep=";", index=False, encoding="latin-1")
         st.download_button(
             label="📥 Descargar Reporte Final (CSV para SICOMP)",
