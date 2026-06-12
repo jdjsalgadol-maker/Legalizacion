@@ -1,6 +1,6 @@
 """
 Pre validador (Versión Definitiva)
-Autor: Juan Salgado (BitCriollo)
+Autor: Juan Salgado
 Arquitectura: Base de Datos Integrada, Autocompletado, Lógica BL y Fuzzy Matching
 """
 import streamlit as st
