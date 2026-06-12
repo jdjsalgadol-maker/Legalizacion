@@ -137,7 +137,7 @@ def format_moneda_co(valor: float) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # ─── 3. INTERFAZ VISUAL ────────────────────────────────────────────────
-st.markdown('<div class="main-header">🛃 SICOMP IA — Clasificación y Ordenamiento Cambiario</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🛃 Pre validador legalizaciones </div>', unsafe_allow_html=True)
 df_proveedores = cargar_maestro_proveedores()
 
 tab_manual, tab_masivo = st.tabs(["📝 Generador de Operación Individual", "📂 Cargue Masivo en Lote"])
